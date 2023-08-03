@@ -1,1 +1,8 @@
 venv/
+
+crop/
+
+vid/
+
+*.mp4
+

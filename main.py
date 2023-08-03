@@ -7,12 +7,16 @@ import PIL
 import sys
 import os
 
+# from easyocr import Reader
+import ezocr
+
 CWD = os.getcwd()
 IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png']
 IMAGE_FILE_PATH = '/img/'
+IMAGE_CROPPED_FILE_PATH = '/img/crop/'
 FIG_IMG_NUM = 1
-cols = 3
-rows = 5
+cols = 4
+rows = 6
 
 def add_subplot_image(figure, src, title, img_num):
     ax1 = figure.add_subplot(rows, cols, img_num) 
@@ -20,13 +24,17 @@ def add_subplot_image(figure, src, title, img_num):
     ax1.set_title(title)
     ax1.axis('off')
 
-def do_thing(image_link):
-    print('do things on ' + image_link)
+def do_thing(img_name):
+
+    cwd = os.getcwd()
+    img_src = cwd + IMAGE_FILE_PATH + img_name 
+    print('do things on ' + img_name)
     plt.style.use('dark_background')
     fig = plt.figure()
     image_to_show = []
 
-    img = cv2.imread(image_link)
+    # img = cv2.imread(img_name)
+    img = cv2.imread(img_src)
     if img is None:
         print('img is None')
         return
@@ -80,6 +88,7 @@ def do_thing(image_link):
     )
     image_to_show.append(img_threshed3)
 
+    print(f'current img_threshed.shape : {img_threshed3.shape}')
     # 테두리 검출 
     contours, _ = cv2.findContours(img_threshed3, mode=cv2.RETR_TREE, method=cv2.CHAIN_APPROX_SIMPLE)
     temp_result = np.zeros((HEIGHT, WIDTH, CHANNEL), dtype=np.uint8)
@@ -194,7 +203,7 @@ def do_thing(image_link):
             cv2.rectangle(temp_result, pt1=(d['x'], d['y']), pt2=(d['x']+d['w'], d['y']+d['h']), color=(255,255,255), thickness=2)
     image_to_show.append(temp_result)
 
-
+    # 번호판 위치 자르기 
     PLATE_WIDTH_PADDING = 1.5
     PLATE_HEIGHT_PADDING = 1.5
     MIN_PLATE_RATIO = 3
@@ -222,7 +231,8 @@ def do_thing(image_link):
         angle = np.degrees(np.arctan(triangle_height / triangle_hypotenus))
         rotation_matrix = cv2.getRotationMatrix2D(center=(plate_cx, plate_cy), angle=angle, scale=1)
 
-        img_rotated = cv2.warpAffine(img_threshed3, M=rotation_matrix, dsize=(WIDTH, HEIGHT))
+        # img_rotated = cv2.warpAffine(img_threshed3, M=rotation_matrix, dsize=(WIDTH, HEIGHT))
+        img_rotated = cv2.warpAffine(img, M=rotation_matrix, dsize=(WIDTH, HEIGHT))
         img_cropped = cv2.getRectSubPix(
             img_rotated,
             patchSize=(int(plate_width), int(plate_height)),
@@ -242,20 +252,29 @@ def do_thing(image_link):
         })
         image_to_show.append(img_cropped)
 
+    # txt = ezocr.read_ocr(img_cropped)
+    # print(txt)
+    # result_string = pytesseract.image_to_string(img_cropped, lang='Hangul', config='--psm 7 --oem 0')
+    result_string = pytesseract.image_to_string(img_cropped, lang='kor', config='--psm 7')
+    print('pytesseract img_to_string : ' + result_string)
 
+    cv2.imwrite(cwd + IMAGE_CROPPED_FILE_PATH + img_name, img_cropped)
 
     for i, img in enumerate(image_to_show):
         add_subplot_image(fig, img, '', i+1)
     plt.show()
+
+    
     
 
 if __name__ == '__main__':
-    # do_thing("/img/2.jpg")
-    cwd = os.getcwd()
-    print(cwd)
-    print(sys.argv[0])
-    do_thing(cwd + IMAGE_FILE_PATH + '34.jpg')
-    do_thing(cwd + IMAGE_FILE_PATH + '65.jpg')
+    # do_thing(cwd + IMAGE_FILE_PATH + '34.jpg')
+    # do_thing(cwd + IMAGE_FILE_PATH + '65.jpg')
+
+    # do_thing('34.jpg')
+    # do_thing('65.jpg')
+    do_thing('14.jpg')
+
     # for img_file in os.listdir(cwd + IMAGE_FILE_PATH):
     #     do_thing(cwd + IMAGE_FILE_PATH + img_file)
     #     break   # for test only one file

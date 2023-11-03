@@ -6,11 +6,12 @@ import numpy as np
 import pytesseract
 import matplotlib.pyplot as plt
 from PIL import ImageFont, ImageDraw, Image
+import easyocr
 
 class ImageOCR:
     VIDEO_PATH = '/vid/'
-    IMAGE_PATH = '/img/ground/'
-    FIGURE = plt.figure()
+    IMAGE_PATH = '/img/'
+    FIGURE = None
     IMAGE_LENGTH = -1
     FIGURE_ROW = 0
     FIGURE_COL = 0
@@ -28,7 +29,6 @@ class ImageOCR:
                 가우시안 블러
                 추가로 모서리 강하게 블러로 탈락
         """
-        
         img_gray = cv2.cvtColor(img_src, cv2.COLOR_BGR2GRAY)
 
         # 노이즈 제거 모폴로지 
@@ -40,12 +40,10 @@ class ImageOCR:
         img_gray_hat = cv2.subtract(imgGrayscale_TopHat, imgBlackHat)
 
         # 모서리 탈락용 강한 블러 영역
-        # x1 = int(self.WIDTH / 3)
         x1 = int(self.WIDTH / 5)
         x2 = self.WIDTH - x1
         y1 = int(self.HEIGHT/ 4)
         y2 = self.HEIGHT - y1
-        print(f'x1,2 y1,2 : {x1} {x2} {y1} {y2}')
 
         # blur_exclude_area = img_gray_hat[y1:y2, x1:x2]
         strong_blurred = cv2.GaussianBlur(img_gray_hat.copy(), ksize=(25, 25), sigmaX=0)
@@ -69,6 +67,11 @@ class ImageOCR:
         return img_threshed
 
     def get_plate_contours(self, img_src):
+        """번호판 테두리 검출
+            MIN_AREA MAX_AREA 설정 필요
+            Return: possible_contours = []
+        """
+        
         # 테두리 검출 
         contours, _ = cv2.findContours(img_src, mode=cv2.RETR_TREE, method=cv2.CHAIN_APPROX_SIMPLE)
         temp_result = np.zeros((self.HEIGHT, self.WIDTH, self.CHANNEL), dtype=np.uint8)
@@ -89,10 +92,9 @@ class ImageOCR:
                 'cy': y + (h / 2),
             })
         # 테두리 중 번호판 검출 
-        MIN_AREA = 20
-        MAX_AREA = 200
-        MIN_WIDTH, MIN_HEIGHT = 2, 8
-        # MIN_WIDTH, MIN_HEIGHT = 0.2, 0.8
+        MIN_WIDTH, MIN_HEIGHT = 10, 40
+        MIN_AREA = MIN_WIDTH * MIN_HEIGHT
+        MAX_AREA = MIN_AREA * 150
         MIN_RATIO, MAX_RATIO = 0.25, 1.0
         possible_contours = []
         cnt = 0
@@ -179,13 +181,13 @@ class ImageOCR:
 
     def cut_plate(self, img_src, matched_list):
         """
-        Summary:
             번호판 위치 자르기
         Description:
-            cut plate position by contours_list and PLATE RATIO
-            PADING TOO
+            cut plate position by contours_list
+            and PLATE RATIO
+            and PADING TOO
         """
-        PLATE_WIDTH_PADDING = 1.5
+        PLATE_WIDTH_PADDING = 1.8
         PLATE_HEIGHT_PADDING = 1.5
         MIN_PLATE_RATIO = 3
         MAX_PLATE_RATIO = 10
@@ -280,6 +282,7 @@ class ImageOCR:
         설명:
             img_list auto figure plot
         """
+        self.FIGURE = plt.figure()
         self.IMAGE_LENGTH = len(img_list)
         self.FIGURE_ROW = int(math.sqrt(self.IMAGE_LENGTH))
         col = self.IMAGE_LENGTH / self.FIGURE_ROW 
@@ -309,7 +312,6 @@ class ImageOCR:
         img_src_link = cwd + self.IMAGE_PATH + img_src
         print('img_ocr on ' + img_src_link)
         plt.style.use('dark_background')
-        self.FIGURE = plt.figure()
         
         images_to_show = []
         img_original = cv2.imread(img_src_link)
@@ -349,20 +351,6 @@ class ImageOCR:
                         color=(255,0,255), thickness=2 )
         images_to_show.append([img_copied, 'contours2'])
 
-         # 다른 block, C 값 임계값으로 테스팅
-        # img_threshed3 = self.threshold(img_blurred, blockSize=31, C=15)
-        # images_to_show.append(img_threshed3)
-        # self.possible_contours = self.get_plate_contours(img_threshed3)
-        # img_copied = img_original.copy()
-        # for d in self.possible_contours:
-        #     cv2.rectangle(img_copied,
-        #                 pt1=(d['x'], d['y']), 
-        #                 pt2=(d['x']+d['w'], d['y']+d['h']), 
-        #                 color=(255,255,255), thickness=2 )
-        # images_to_show.append(img_copied)
-
-
-
         # plate contour 검출 ( 인접 contour와 크기, 각도 등으로 )
         possible_idx = self.find_chars(self.possible_contours)
         print(f'possible_idx.length : {len(possible_idx)}')
@@ -378,28 +366,35 @@ class ImageOCR:
                         pt2=(d['x']+d['w'], d['y']+d['h']), 
                         color=(0,255,255), thickness=2 )
         images_to_show.append([img_copied, 'plate chars'])
-
-        print(f'이미지 크기 잠깐 점검 img_src : {self.IMAGE.shape}')
-        print(f'이미지 크기 잠깐 점검 img_contours : {img_copied.shape}')
+        # print(f'이미지 크기 잠깐 점검 img_src : {self.IMAGE.shape}')
+        # print(f'이미지 크기 잠깐 점검 img_contours : {img_copied.shape}')
 
         # plate 검출 및 회전
+        
         possible_plates = self.cut_plate(img_original, matched_list)
-        print(f'possible_plates.length {len(possible_plates)}')
+        print(f'번호판 예상 개수 = {len(possible_plates)} 개')
         for i, plate_image in enumerate(possible_plates):
             plate_string = pytesseract.image_to_string(plate_image, lang='kor', config='--psm 7')
             images_to_show.append([plate_image, f'plate_cut{i}'])
-            print(f'plate_cut {i} ' + plate_string)
+            print(f'cropped 번호판 인식 (--psm 7) {i} : ' + plate_string)
             plate_string_conf = pytesseract.image_to_string(plate_image, lang='kor', config='--oem 1 --psm 6')
-            print(f'plate_cut {i} - config ' + plate_string_conf)
+            print(f'cropped 번호판 인식 (--oem 1 --psm 6) {i} : ' + plate_string_conf)
 
             sharpend = self.sharpning(plate_image, 9)
             plate_string = pytesseract.image_to_string(sharpend, lang='kor', config='--psm 7')
             images_to_show.append([sharpend, f'plate_sharp{i}'])
-            print(f'plate_sharp {i} ' + plate_string)
+            print(f'sharped 번호판 인식 (--psm 7) {i} : ' + plate_string)
             plate_string_conf = pytesseract.image_to_string(plate_image, lang='kor', config='--oem 1 --psm 6')
-            print(f'plate_sharp {i} - config ' + plate_string_conf)
+            print(f'sharped 번호판 인식 (--oem 1 --psm 6) {i} : ' + plate_string_conf)
 
-
+        ezocr = easyocr.Reader(['ko'], gpu=True)
+        for i, plate_image in enumerate(possible_plates):
+            result = ezocr.readtext(plate_image)
+            print(f'easyocr result : {result}')
+            sharpend = self.sharpning(plate_image, 9)
+            images_to_show.append([sharpend, 'sharpend?'])
+            result = ezocr.readtext(sharpend)
+            print(f'easyocr result (sharped) : {result}')
 
         # is_plate = self.check_plate_regex(plate_string)
 
@@ -501,8 +496,8 @@ if __name__ == '__main__':
     # ocr.img_ocr('20230801-110709.jpg')
     # ocr.img_ocr('20230801-111513.jpg')
     # ocr.img_ocr('20230801-out-081324.jpg')
-    ocr.img_ocr('/new/1.jpg')
-    # ocr.img_ocr('/new/1.jpg')
-    ocr.img_ocr('/new/3.jpg')
+    # ocr.img_ocr('new/1.png')
+    # ocr.img_ocr('new/7302.png')
+    ocr.img_ocr('new/7302.png')
 
     pass
